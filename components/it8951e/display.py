@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import esphome.codegen as cg
 from esphome import pins
 from esphome import automation
@@ -7,29 +9,31 @@ from esphome.const import (
     CONF_NAME,
     CONF_ID,
     CONF_RESET_PIN,
-    CONF_BUSY_PIN,
     CONF_PAGES,
     CONF_LAMBDA,
     CONF_REVERSED,
 )
 
+from esphome.const import __version__ as ESPHOME_VERSION
+
 DEPENDENCIES = ['spi']
 
 CONF_DISPLAY_CS_PIN = "display_cs_pin"
+CONF_READY_PIN = "ready_pin"
 
 it8951e_ns = cg.esphome_ns.namespace('it8951e')
-IT8951ESensor = it8951e_ns.class_(
-    'IT8951ESensor', cg.PollingComponent, spi.SPIDevice, display.DisplayBuffer
+IT8951EDisplay = it8951e_ns.class_(
+    'IT8951EDisplay', cg.PollingComponent, spi.SPIDevice, display.DisplayBuffer
 )
 ClearAction = it8951e_ns.class_("ClearAction", automation.Action)
 
 CONFIG_SCHEMA = cv.All(
     display.FULL_DISPLAY_SCHEMA.extend(
         {
-            cv.GenerateID(): cv.declare_id(IT8951ESensor),
+            cv.GenerateID(): cv.declare_id(IT8951EDisplay),
             cv.Optional(CONF_NAME): cv.string,
             cv.Required(CONF_RESET_PIN): pins.gpio_output_pin_schema,
-            cv.Required(CONF_BUSY_PIN): pins.gpio_input_pin_schema,
+            cv.Required(CONF_READY_PIN): pins.gpio_input_pin_schema,
             cv.Required(CONF_DISPLAY_CS_PIN): pins.gpio_input_pin_schema,
             cv.Optional(CONF_REVERSED): cv.boolean,
         }
@@ -44,7 +48,7 @@ CONFIG_SCHEMA = cv.All(
     ClearAction,
     automation.maybe_simple_id(
         {
-            cv.GenerateID(): cv.use_id(IT8951ESensor),
+            cv.GenerateID(): cv.use_id(IT8951EDisplay),
         }
     ),
 )
@@ -56,7 +60,8 @@ async def bm8563_read_time_to_code(config, action_id, template_arg, args):
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await display.register_display(var, config)
-    await cg.register_component(var, config)
+    if cv.Version.parse(ESPHOME_VERSION) < cv.Version.parse("2023.12.0"):
+        await cg.register_component(var, config)
     await spi.register_spi_device(var, config)
 
     if CONF_DISPLAY_CS_PIN in config:
@@ -64,14 +69,14 @@ async def to_code(config):
         cg.add(var.set_cs_pin(cs))
     if CONF_LAMBDA in config:
         lambda_ = await cg.process_lambda(
-            config[CONF_LAMBDA], [(display.DisplayBufferRef, "it")], return_type=cg.void
+            config[CONF_LAMBDA], [(display.DisplayRef, "it")], return_type=cg.void
         )
         cg.add(var.set_writer(lambda_))
     if CONF_RESET_PIN in config:
         reset = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
         cg.add(var.set_reset_pin(reset))
-    if CONF_BUSY_PIN in config:
-        busy = await cg.gpio_pin_expression(config[CONF_BUSY_PIN])
-        cg.add(var.set_busy_pin(busy))
+    if CONF_READY_PIN in config:
+        ready = await cg.gpio_pin_expression(config[CONF_READY_PIN])
+        cg.add(var.set_ready_pin(ready))
     if CONF_REVERSED in config:
         cg.add(var.set_reversed(config[CONF_REVERSED]))
