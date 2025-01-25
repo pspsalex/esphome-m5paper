@@ -1,16 +1,8 @@
 #pragma once
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "esphome/core/component.h"
-#include "esphome/components/sensor/sensor.h"
 #include "esphome/core/gpio.h"
-#include "esphome/core/automation.h"
-
-#ifdef USE_ESP32
-#include "driver/adc.h"
-#include "soc/adc_channel.h"
-#include <esp_adc_cal.h>
-#define BAT_ADC_CHANNEL ADC1_GPIO35_CHANNEL
-#endif
 
 namespace esphome {
 namespace m5paper {
@@ -23,16 +15,15 @@ class M5PaperComponent : public PollingComponent {
     public:
         void set_battery_power_pin(GPIOPin *power) { this->battery_power_pin_ = power; }
         void set_main_power_pin(GPIOPin *power) { this->main_power_pin_ = power; }
-        void set_battery_voltage(sensor::Sensor *battery_voltage) { battery_voltage_ = battery_voltage; }
+        void set_sd_cs_pin(GPIOPin *sdcs) { this->sd_cs_pin_ = sdcs; }
         void shutdown_main_power();
+
+        float get_setup_priority() const override { return setup_priority::BUS; }
 
     private:
         GPIOPin *battery_power_pin_{nullptr};
         GPIOPin *main_power_pin_{nullptr};
-        sensor::Sensor *battery_voltage_{nullptr};
-
-        esp_adc_cal_characteristics_t *_adc_chars;
-
+        GPIOPin *sd_cs_pin_{nullptr};
 };
 
 template<typename... Ts> class PowerAction : public Action<Ts...>, public Parented<M5PaperComponent> {

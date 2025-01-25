@@ -1,0 +1,136 @@
+esphome:
+  name: m5paper
+  platformio_options:
+    build_flags:
+      - "-DLV_USE_ANIMATION=0"
+
+external_components:
+  - source: components
+
+# ESP-IDF:
+esp32:
+  board: m5stack_paper
+  framework:
+    type: esp-idf
+
+# Arduino:
+# esp32:
+#   board: m5stack-fire
+#   framework:
+#     type: arduino
+
+# For networing in qemu, uncomment the "ethernet" section and keep the "wifi" section commented out
+# ethernet:
+#   type: OPENETH
+
+# For wifi on the m5paper, uncomment the "wifi" section below and keep the "ethernet" section above commented out:
+# wifi:
+#   ssid: your-wifi-name
+#   password: your-wifi-password
+
+#   # Enable fallback hotspot (captive portal) in case wifi connection fails
+#   ap:
+#     ssid: ${friendly_name} AP
+#     password: !secret fallback_ap_password
+
+# For networking and HA support, enable the "api" and "ota" sections below:
+# api:
+
+# ota:
+#   - platform: esphome
+
+lvgl:
+  draw_rounding: 4
+  displays:
+    - m5paper_display
+  touchscreens:
+    - gt911_touchscreen
+  pages:
+    - id: main_page
+      widgets:
+        - label:
+            align: CENTER
+            text: "Hello world!"
+            text_font: montserrat_32
+            text_color: black
+
+# Enable logging
+logger:
+  level: DEBUG
+
+psram:
+
+# Sets up the power supply to the device
+m5paper:
+  battery_power_pin:
+    number: GPIO5
+    ignore_strapping_warning: true
+  main_power_pin:
+    number: GPIO2
+    ignore_strapping_warning: true
+  sd_cs_pin: GPIO4
+  update_interval: never
+
+# For display
+spi:
+  - id: epd_spi
+    clk_pin: GPIO14
+    mosi_pin:
+      number: GPIO12
+      ignore_strapping_warning: true
+    miso_pin: GPIO13
+    interface: spi3
+
+# For touchscreen
+i2c:
+  - id: bus_a
+    sda: GPIO21
+    scl: GPIO22
+
+display:
+  - platform: it8951e
+    id: m5paper_display
+    display_cs_pin:
+      number: GPIO15
+      ignore_strapping_warning: true
+    reset_pin: GPIO23
+    ready_pin: GPIO27
+    rotation: 0
+    reversed: false
+    auto_clear_enabled: false
+    update_interval: 100ms
+    #show_test_card: true
+    #lambda: |-
+    #  it.line(0,0,50,50);
+
+touchscreen:
+  platform: gt911
+  transform:
+    swap_xy: true
+    mirror_x: true
+    mirror_y: false
+  id: gt911_touchscreen
+  display: m5paper_display
+  interrupt_pin: GPIO36
+
+  on_touch:
+    - logger.log:
+        format: Touch at (%d, %d)
+        args: [touch.x, touch.y]
+    - lambda: |-
+        ESP_LOGI("cal", "x=%d, y=%d, x_raw=%d, y_raw=%0d",
+            touch.x,
+            touch.y,
+            touch.x_raw,
+            touch.y_raw
+            );
+
+binary_sensor:
+  - platform: gpio
+    name: "Right"
+    id: right_button
+    pin:
+      number: GPIO37
+      inverted: true
+    on_release:
+      - component.update: m5paper_display
