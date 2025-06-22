@@ -29,6 +29,13 @@ std::unique_ptr<T> make_unique(Args&&... args) {
 using std::make_unique;
 #endif
 
+
+#if defined(IT8951E_ENABLE_DEBUG_LOGGING) && (IT8951E_ENABLE_DEBUG_LOGGING==1)
+#define IT8951E_LOGD ESP_LOGD
+#else
+#define IT8951E_LOGD(...)
+#endif
+
 class IT8951EDisplay::Impl
 {
   public:
@@ -151,7 +158,7 @@ void IT8951EDisplay::Impl::setup()
     this->write_register(Register::I80PCR, 0x0001);
 
     // Set vcom to -2.30v
-    ESP_LOGD(TAG, "Set VCOM");
+    IT8951E_LOGD(TAG, "Set VCOM");
     uint16_t const args[2] = {0x0001, 2300};
     this->send_command_with_args(Command::I80_CMD_VCOM, args, 2);
 }
@@ -197,7 +204,7 @@ bool IT8951EDisplay::Impl::wait_comms_ready(uint32_t const timeout) const
  */
 void IT8951EDisplay::Impl::send_command(Command const command) const
 {
-    ESP_LOGD(TAG, "Write command 0x%02x", command);
+    IT8951E_LOGD(TAG, "Write command 0x%02x", command);
     if (!this->wait_comms_ready())
     {
         ESP_LOGE(TAG, "Display busy trying to write preamble for command 0x%04x", command);
@@ -225,7 +232,7 @@ void IT8951EDisplay::Impl::send_command(Command const command) const
  */
 void IT8951EDisplay::Impl::write_word(uint16_t const data) const
 {
-    ESP_LOGD(TAG, "Write word 0x%04x", data);
+    IT8951E_LOGD(TAG, "Write word 0x%04x", data);
     if (!this->wait_comms_ready())
     {
         ESP_LOGE(TAG, "Display busy trying to write preamble for writing 0x%04x", data);
@@ -413,7 +420,7 @@ void IT8951EDisplay::Impl::update_device_info()
     lut_version[16] = 0;
     fw_version[16] = 0;
 
-    ESP_LOGD(TAG, "Width: %d, Height: %d, LUT: %s, FW: %s, Mem:%x%04x",
+    IT8951E_LOGD(TAG, "Width: %d, Height: %d, LUT: %s, FW: %s, Mem:%x%04x",
         width,
         height,
         lut_version,
@@ -558,7 +565,7 @@ void IT8951EDisplay::Impl::write_buffer_to_display(uint16_t const x, uint16_t co
 
     this->send_command(Command::TCON_LD_IMG_END);
 
-    this->update_area(x, y, w, h, UpdateMode::GL16);
+    this->update_area(x, y, w, h, UpdateMode::GLR16);
 }
 
 
@@ -601,7 +608,7 @@ void HOT IT8951EDisplay::Impl::put_pixel(int const x, int const y, Color const c
  */
 void IT8951EDisplay::Impl::notify_update(uint16_t const x, uint16_t const y, uint16_t const w, uint16_t const h)
 {
-    ESP_LOGD(TAG, "Notify update: %d, %d, %d, %d", x, y, w, h);
+    IT8951E_LOGD(TAG, "Notify update: %d, %d, %d, %d", x, y, w, h);
     // Check if two rectangles overlap
     auto overlap = [](const Rect &a, const Rect &b)
     {
@@ -626,9 +633,9 @@ void IT8951EDisplay::Impl::notify_update(uint16_t const x, uint16_t const y, uin
     {
         if (overlap(rect, new_rect))
         {
-            ESP_LOGD(TAG, "(%d, %d, %d, %d) overlaps (%d, %d, %d, %d)", rect.x, rect.y, rect.w, rect.h, new_rect.x, new_rect.y, new_rect.w, new_rect.h);
+            IT8951E_LOGD(TAG, "(%d, %d, %d, %d) overlaps (%d, %d, %d, %d)", rect.x, rect.y, rect.w, rect.h, new_rect.x, new_rect.y, new_rect.w, new_rect.h);
             rect = merge(rect, new_rect);
-            ESP_LOGD(TAG, "Merged into (%d, %d, %d, %d)", rect.x, rect.y, rect.w, rect.h);
+            IT8951E_LOGD(TAG, "Merged into (%d, %d, %d, %d)", rect.x, rect.y, rect.w, rect.h);
             merged = true;
             break;
         }
@@ -636,7 +643,7 @@ void IT8951EDisplay::Impl::notify_update(uint16_t const x, uint16_t const y, uin
 
     if (!merged)
     {
-        ESP_LOGD(TAG, "Pushing (%d, %d, %d, %d)", new_rect.x, new_rect.y, new_rect.w, new_rect.h);
+        IT8951E_LOGD(TAG, "Pushing (%d, %d, %d, %d)", new_rect.x, new_rect.y, new_rect.w, new_rect.h);
         this->update_areas.push_back(new_rect);
     }
 }
@@ -651,7 +658,7 @@ void IT8951EDisplay::Impl::do_update()
     {
         for (auto &rect : this->update_areas)
         {
-            ESP_LOGD(TAG, "Pushing area (%d, %d) --> (%d, %d) to display", rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
+            IT8951E_LOGD(TAG, "Pushing area (%d, %d) --> (%d, %d) to display", rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
             this->write_buffer_to_display(rect.x, rect.y, rect.w, rect.h);
         }
         this->update_areas.clear();
@@ -662,7 +669,7 @@ void IT8951EDisplay::Impl::do_update()
     if ((this->schedule_clean) && (millis() - this->last_update_time > 20000))
     {
         // Display data is already transferred, the IT8951E must only refresh the EPD
-        ESP_LOGD(TAG, "Inactivity - cleaning display.");
+        IT8951E_LOGD(TAG, "Inactivity - cleaning display.");
         this->update_area(0, 0, this->width, this->height, UpdateMode::GC16);
         this->last_update_time = millis();
         this->schedule_clean = false;
@@ -776,16 +783,16 @@ void IT8951EDisplay::clear()
  */
 void IT8951EDisplay::setup()
 {
-    ESP_LOGD(TAG, "Init Starting.");
+    IT8951E_LOGD(TAG, "Init Starting.");
 
     this->spi_setup();
 
     this->m->setup();
 
-    ESP_LOGD(TAG, "Clearing display...");
+    IT8951E_LOGD(TAG, "Clearing display...");
     this->m->clear(true);
 
-    ESP_LOGD(TAG, "Init SUCCESS.");
+    IT8951E_LOGD(TAG, "Init SUCCESS.");
 }
 
 
