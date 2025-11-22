@@ -11,7 +11,7 @@ If you plan on running the app in eqmu, please use esp-idf.
 
 ## Emulating with QEMU
 
-There are a few prerequisites needed before the gneerated app can run in esp-qemu:
+There are a few prerequisites needed before the generated app can run in esp-qemu:
 
 - A version of esp-qemu which simulates the IT8951E. See `https://github.com/pspsalex/qemu`
 - A binary dump of the e-fuses, either dumped from an ESP32, or from the below file
