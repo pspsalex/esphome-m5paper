@@ -709,7 +709,9 @@ void IT8951EDisplay::Impl::do_update()
         for (auto &rect : this->update_areas)
         {
             IT8951E_LOGD(TAG, "Pushing area (%d, %d) --> (%d, %d) to display", rect.x1, rect.y1, rect.x2, rect.y2);
-            this->write_buffer_to_display(rect.x1, rect.y1, rect.x2 - rect.x1 + 1, rect.y2 - rect.y1 + 1);
+            this->write_buffer_to_display(
+                static_cast<uint16_t>(rect.x1), static_cast<uint16_t>(rect.y1),
+                static_cast<uint16_t>(rect.x2 - rect.x1 + 1), static_cast<uint16_t>(rect.y2 - rect.y1 + 1));
         }
         this->update_areas.clear();
         this->last_update_time = millis();
