@@ -20,6 +20,8 @@ DEPENDENCIES = ['spi']
 
 CONF_DISPLAY_CS_PIN = "display_cs_pin"
 CONF_READY_PIN = "ready_pin"
+CONF_FULL_REFRESH_INTERVAL = "full_refresh_interval"
+CONF_FULL_REFRESH_MIN_IDLE = "full_refresh_min_idle"
 
 it8951e_ns = cg.esphome_ns.namespace('it8951e')
 IT8951EDisplay = it8951e_ns.class_(
@@ -34,8 +36,10 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_NAME): cv.string,
             cv.Required(CONF_RESET_PIN): pins.gpio_output_pin_schema,
             cv.Required(CONF_READY_PIN): pins.gpio_input_pin_schema,
-            cv.Required(CONF_DISPLAY_CS_PIN): pins.gpio_input_pin_schema,
+            cv.Required(CONF_DISPLAY_CS_PIN): pins.gpio_output_pin_schema,
             cv.Optional(CONF_REVERSED): cv.boolean,
+            cv.Optional(CONF_FULL_REFRESH_INTERVAL, default="5min"): cv.positive_time_period_milliseconds,
+            cv.Optional(CONF_FULL_REFRESH_MIN_IDLE, default="5s"): cv.positive_time_period_milliseconds,
         }
     )
     .extend(cv.polling_component_schema("1s"))
@@ -80,3 +84,5 @@ async def to_code(config):
         cg.add(var.set_ready_pin(ready))
     if CONF_REVERSED in config:
         cg.add(var.set_reversed(config[CONF_REVERSED]))
+    cg.add(var.set_full_refresh_interval(config[CONF_FULL_REFRESH_INTERVAL]))
+    cg.add(var.set_full_refresh_min_idle(config[CONF_FULL_REFRESH_MIN_IDLE]))

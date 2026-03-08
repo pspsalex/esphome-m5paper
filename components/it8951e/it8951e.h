@@ -25,6 +25,8 @@ class IT8951EDisplay: public display::DisplayBuffer,
     void set_ready_pin(GPIOPin *pin);
     void set_cs_pin(GPIOPin *pin);
     void set_reversed(bool reversed);
+    void set_full_refresh_interval(uint32_t ms);
+    void set_full_refresh_min_idle(uint32_t ms);
 
     void setup() override;
     void update() override;
@@ -45,12 +47,6 @@ class IT8951EDisplay: public display::DisplayBuffer,
   private:
     class Impl;
     std::unique_ptr<Impl> m;
-
-    uint32_t max_x = 0;
-    uint32_t max_y = 0;
-
-    void write_buffer_to_display(uint16_t x, uint16_t y, uint16_t w, uint16_t h, const uint8_t *gram);
-    void write_display();
 };
 
 template<typename... Ts> class ClearAction : public Action<Ts...>, public Parented<IT8951EDisplay> {
@@ -58,5 +54,5 @@ public:
 void play(Ts... x) override { this->parent_->clear(); }
 };
 
-}  // namespace empty_spi_sensor
+}  // namespace it8951e
 }  // namespace esphome

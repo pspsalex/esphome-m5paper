@@ -6,7 +6,7 @@
 #include "esphome/core/application.h"
 #include "esphome/core/gpio.h"
 
-#include <list>
+#include <vector>
 #include <memory>
 
 
@@ -42,13 +42,13 @@ class IT8951EDisplay::Impl
     Impl(IT8951EDisplay *parent) : parent(parent) {}
 
     void setup();
-    void clear(bool const init) const;
+    void clear(bool const init);
     void write_buffer_to_display(uint16_t const x, uint16_t const y, uint16_t const w, uint16_t const h) const;
-    void notify_update(uint16_t const x, uint16_t const y, uint16_t const w, uint16_t const h);
+    void notify_update(int_fast16_t const x, int_fast16_t const y, int_fast16_t const w, int_fast16_t const h);
 
     size_t get_buffer_size() const;
     void init_buffer(size_t buffer_size);
-    void put_pixel(int const x, int const y, Color const color);
+    void put_pixel(int_fast16_t const x, int_fast16_t const y, Color const color);
     void do_update();
 
     char lut_version[17] = {0};
@@ -63,18 +63,26 @@ class IT8951EDisplay::Impl
     GPIOPin *ready_pin = nullptr;
     GPIOPin *cs_pin = nullptr;
 
+    uint32_t full_refresh_interval_ms = 300000;  // 5 minutes
+    uint32_t full_refresh_min_idle_ms = 5000;    // 5 seconds
+
   private:
     IT8951EDisplay *parent;
 
     struct Rect {
-        uint16_t x, y, w, h;
+        int_fast16_t x1, y1, x2, y2;
     };
 
-    std::list<Rect> update_areas;
+    std::vector<Rect> update_areas;
+
+    // Dirty bounding box for pixels written via draw_absolute_pixel_internal.
+    // Sentinels (x1 > x2) mean nothing is dirty.
+    Rect dirty_rect = {INT_FAST16_MAX, INT_FAST16_MAX, INT_FAST16_MIN, INT_FAST16_MIN};
 
     uint8_t *buffer = nullptr;
 
     uint32_t last_update_time = 0;
+    uint32_t last_full_refresh_time = 0;
     bool schedule_clean = false;
 
     uint16_t image_buffer_address_high = 0x0012;
@@ -116,11 +124,30 @@ class SelectDevice
 
 
 /**
+ * @brief Align a region to the IT8951E's 4-pixel boundary requirement.
+ * @param x      Left edge (input, may be unaligned)
+ * @param w      Width (input, may be unaligned)
+ * @param ax     Aligned left edge (output, rounded down to multiple of 4)
+ * @param aw     Aligned width (output, expanded to cover the full input region)
+ */
+static void align_to_4px(uint16_t const x, uint16_t const w, uint16_t &ax, uint16_t &aw)
+{
+    ax = x & 0xFFFC;
+    aw = ((x + w - ax) + 3) & 0xFFFC;
+}
+
+
+/**
  * @brief Allocate memory for the local screen buffer
  * @param buffer_size Size of buffer to allocate
  */
 void IT8951EDisplay::Impl::init_buffer(size_t buffer_size)
 {
+    if (this->buffer != nullptr)
+    {
+        free(this->buffer);
+        this->buffer = nullptr;
+    }
     ExternalRAMAllocator<uint8_t> allocator(ExternalRAMAllocator<uint8_t>::ALLOW_FAILURE);
     this->buffer = allocator.allocate(buffer_size);
     if (this->buffer == nullptr)
@@ -326,17 +353,19 @@ void IT8951EDisplay::Impl::send_command_with_args(Command const cmd, uint16_t co
         return;
     }
 
-    SelectDevice display(this->cs_pin);
-    this->parent->write_byte16(PREAMBLE_WRITE_DATA);
-
-    for (uint16_t argument = 0; argument < length; argument++)
     {
-        if (!this->wait_comms_ready())
+        SelectDevice display(this->cs_pin);
+        this->parent->write_byte16(PREAMBLE_WRITE_DATA);
+
+        for (uint16_t argument = 0; argument < length; argument++)
         {
-            ESP_LOGE(TAG, "Display not ready to receive command argument #%d", argument);
-            return;
+            if (!this->wait_comms_ready())
+            {
+                ESP_LOGE(TAG, "Display not ready to receive command argument #%d", argument);
+                return;
+            }
+            this->parent->write_byte16(args[argument]);
         }
-        this->parent->write_byte16(args[argument]);
     }
 }
 
@@ -377,7 +406,7 @@ void IT8951EDisplay::Impl::write_register(Register const address, uint16_t const
 bool IT8951EDisplay::Impl::wait_display_ready(uint32_t const timeout) const
 {
     uint32_t const start_time = millis();
-    while (millis() - start_time > timeout)
+    while (millis() - start_time < timeout)
     {
         if (this->read_register(Register::LUTAFSR) == 0)
         {
@@ -441,13 +470,14 @@ void IT8951EDisplay::Impl::update_device_info()
  * @param w Width of the draw window. Must be a multiple of 4
  * @param h Height of the draw window.
  */
+// x and w must already be 4-pixel aligned (use align_to_4px before calling).
 void IT8951EDisplay::Impl::set_area(uint16_t const x, uint16_t const y, uint16_t const w, uint16_t const h) const
 {
     uint16_t args[5];
     args[0] = (static_cast<uint16_t>(Endianness::BIG) << 8) | (static_cast<uint16_t>(PixelMode::BPP_4) << 4) | (static_cast<uint16_t>(Rotation::ROTATE_0));
-    args[1] = (x + 3) & 0xFFFC;
+    args[1] = x;
     args[2] = y;
-    args[3] = (w + 3) & 0xFFFC;
+    args[3] = w;
     args[4] = h;
     this->send_command_with_args(Command::TCON_LD_IMG_AREA, args, 5);
 }
@@ -468,16 +498,24 @@ void IT8951EDisplay::Impl::update_area(uint16_t const x, uint16_t const y, uint1
         return;
     }
 
+    uint16_t const effective_w = ((x + w) > this->width) ? (this->width - x) : w;
+    uint16_t const clamped_h = ((y + h) > this->height) ? (this->height - y) : h;
+    uint16_t aligned_x, aligned_w;
+    align_to_4px(x, effective_w, aligned_x, aligned_w);
+
     uint16_t args[7];
-    args[0] = (x + 3) & 0xFFFC;
+    args[0] = aligned_x;
     args[1] = y;
-    args[2] = ((((x + w) > this->width) ? (this->width - x) : w) + 3) & 0xFFFC;
-    args[3] = ((y + h) > this->height) ? (this->height - y) : h;
+    args[2] = aligned_w;
+    args[3] = clamped_h;
     args[4] = static_cast<uint16_t>(mode);
     args[5] = this->image_buffer_address_low;
     args[6] = this->image_buffer_address_high;
 
-    this->wait_display_ready();
+    if (!this->wait_display_ready())
+    {
+        ESP_LOGE(TAG, "Timeout waiting for display ready before area update");
+    }
     this->send_command_with_args(Command::I80_CMD_DPY_BUF_AREA, args, 7);
 }
 
@@ -498,7 +536,7 @@ void IT8951EDisplay::Impl::set_target_memory_addr(uint16_t const address_high, u
  * @brief Clear display
  * @param init If true, a display update is performed, clearing the display irrespective of the buffer data
  */
-void IT8951EDisplay::Impl::clear(bool const init) const
+void IT8951EDisplay::Impl::clear(bool const init)
 {
     this->set_target_memory_addr(this->image_buffer_address_high, this->image_buffer_address_low);
     this->set_area(0, 0, width, height);
@@ -516,6 +554,7 @@ void IT8951EDisplay::Impl::clear(bool const init) const
     if (init)
     {
         this->update_area(0, 0, width, height, UpdateMode::Init);
+        this->last_full_refresh_time = millis();
     }
 }
 
@@ -551,15 +590,18 @@ void IT8951EDisplay::Impl::write_buffer_to_display(uint16_t const x, uint16_t co
         return;
     }
 
+    uint16_t aligned_x, aligned_w;
+    align_to_4px(x, w, aligned_x, aligned_w);
+
     this->set_target_memory_addr(this->image_buffer_address_high, this->image_buffer_address_low);
-    this->set_area(x, y, w, h);
+    this->set_area(aligned_x, y, aligned_w, h);
 
     {
         SelectDevice display(this->cs_pin);
         this->parent->write_byte16(PREAMBLE_WRITE_DATA);
         for (uint32_t cursor_y = y; cursor_y < y + h; cursor_y++) {
-            uint32_t pos = cursor_y*(this->width >> 1) + (((x + 3) & 0xFFFC) >> 1);
-            this->parent->write_array(buffer + pos, ((w + 3) & 0xFFFC) >> 1);
+            uint32_t pos = cursor_y * (this->width >> 1) + (aligned_x >> 1);
+            this->parent->write_array(buffer + pos, aligned_w >> 1);
         }
     }
 
@@ -575,7 +617,7 @@ void IT8951EDisplay::Impl::write_buffer_to_display(uint16_t const x, uint16_t co
  * @param y Y coordinate of the pixel
  * @param Color color of the pixel
  */
-void HOT IT8951EDisplay::Impl::put_pixel(int const x, int const y, Color const color)
+void HOT IT8951EDisplay::Impl::put_pixel(int_fast16_t const x, int_fast16_t const y, Color const color)
 {
     // Validation happens outside this function
     uint32_t internal_color = ((color.r*77) + (color.g*151) + (color.b*28)) >> 12;
@@ -596,6 +638,11 @@ void HOT IT8951EDisplay::Impl::put_pixel(int const x, int const y, Color const c
         this->buffer[index] &= 0x0F;
         this->buffer[index] |= internal_color << 4;
     }
+
+    if (x < this->dirty_rect.x1) this->dirty_rect.x1 = x;
+    if (y < this->dirty_rect.y1) this->dirty_rect.y1 = y;
+    if (x > this->dirty_rect.x2) this->dirty_rect.x2 = x;
+    if (y > this->dirty_rect.y2) this->dirty_rect.y2 = y;
 }
 
 
@@ -606,46 +653,41 @@ void HOT IT8951EDisplay::Impl::put_pixel(int const x, int const y, Color const c
  * @param w Width of the updated area
  * @param h Height of the updated area
  */
-void IT8951EDisplay::Impl::notify_update(uint16_t const x, uint16_t const y, uint16_t const w, uint16_t const h)
+void IT8951EDisplay::Impl::notify_update(int_fast16_t const x, int_fast16_t const y, int_fast16_t const w, int_fast16_t const h)
 {
     IT8951E_LOGD(TAG, "Notify update: %d, %d, %d, %d", x, y, w, h);
     // Check if two rectangles overlap
     auto overlap = [](const Rect &a, const Rect &b)
     {
-        return !(((a.x + a.w) <= b.x) || ((b.x + b.w) <= a.x) || ((a.y + a.h) <= b.y) || ((b.y + b.h) <= a.y));
+        return !(a.x2 <= b.x1 || b.x2 <= a.x1 || a.y2 <= b.y1 || b.y2 <= a.y1);
     };
 
     // Merge two rectangles
     auto merge = [](const Rect &a, const Rect &b)
     {
-        uint16_t x = std::min(a.x, b.x);
-        uint16_t y = std::min(a.y, b.y);
-        uint16_t w = std::max(a.x + a.w, b.x + b.w) - x;
-        uint16_t h = std::max(a.y + a.h, b.y + b.h) - y;
-        return Rect{x, y, w, h};
+        return Rect{std::min(a.x1, b.x1), std::min(a.y1, b.y1),
+                    std::max(a.x2, b.x2), std::max(a.y2, b.y2)};
     };
 
-    Rect new_rect = {x, y, w, h};
+    Rect new_rect = {x, y, x + w - 1, y + h - 1};
 
-    bool merged = false;
-
-    for (auto &rect : this->update_areas)
+    for (auto it = this->update_areas.begin(); it != this->update_areas.end(); )
     {
-        if (overlap(rect, new_rect))
+        if (overlap(*it, new_rect))
         {
-            IT8951E_LOGD(TAG, "(%d, %d, %d, %d) overlaps (%d, %d, %d, %d)", rect.x, rect.y, rect.w, rect.h, new_rect.x, new_rect.y, new_rect.w, new_rect.h);
-            rect = merge(rect, new_rect);
-            IT8951E_LOGD(TAG, "Merged into (%d, %d, %d, %d)", rect.x, rect.y, rect.w, rect.h);
-            merged = true;
-            break;
+            IT8951E_LOGD(TAG, "(%d, %d, %d, %d) overlaps (%d, %d, %d, %d)", it->x1, it->y1, it->x2, it->y2, new_rect.x1, new_rect.y1, new_rect.x2, new_rect.y2);
+            new_rect = merge(*it, new_rect);
+            IT8951E_LOGD(TAG, "Merged into (%d, %d, %d, %d)", new_rect.x1, new_rect.y1, new_rect.x2, new_rect.y2);
+            it = this->update_areas.erase(it);
+        }
+        else
+        {
+            ++it;
         }
     }
 
-    if (!merged)
-    {
-        IT8951E_LOGD(TAG, "Pushing (%d, %d, %d, %d)", new_rect.x, new_rect.y, new_rect.w, new_rect.h);
-        this->update_areas.push_back(new_rect);
-    }
+    IT8951E_LOGD(TAG, "Pushing (%d, %d, %d, %d)", new_rect.x1, new_rect.y1, new_rect.x2, new_rect.y2);
+    this->update_areas.push_back(new_rect);
 }
 
 
@@ -654,25 +696,40 @@ void IT8951EDisplay::Impl::notify_update(uint16_t const x, uint16_t const y, uin
  */
 void IT8951EDisplay::Impl::do_update()
 {
-    if (this->update_areas.size())
+    if (this->dirty_rect.x1 <= this->dirty_rect.x2)
+    {
+        this->notify_update(this->dirty_rect.x1, this->dirty_rect.y1,
+                            this->dirty_rect.x2 - this->dirty_rect.x1 + 1,
+                            this->dirty_rect.y2 - this->dirty_rect.y1 + 1);
+        this->dirty_rect = {INT_FAST16_MAX, INT_FAST16_MAX, INT_FAST16_MIN, INT_FAST16_MIN};
+    }
+
+    if (!this->update_areas.empty())
     {
         for (auto &rect : this->update_areas)
         {
-            IT8951E_LOGD(TAG, "Pushing area (%d, %d) --> (%d, %d) to display", rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
-            this->write_buffer_to_display(rect.x, rect.y, rect.w, rect.h);
+            IT8951E_LOGD(TAG, "Pushing area (%d, %d) --> (%d, %d) to display", rect.x1, rect.y1, rect.x2, rect.y2);
+            this->write_buffer_to_display(rect.x1, rect.y1, rect.x2 - rect.x1 + 1, rect.y2 - rect.y1 + 1);
         }
         this->update_areas.clear();
         this->last_update_time = millis();
         this->schedule_clean = true;
     }
 
-    if ((this->schedule_clean) && (millis() - this->last_update_time > 20000))
+    if (this->schedule_clean)
     {
-        // Display data is already transferred, the IT8951E must only refresh the EPD
-        IT8951E_LOGD(TAG, "Inactivity - cleaning display.");
-        this->update_area(0, 0, this->width, this->height, UpdateMode::GC16);
-        this->last_update_time = millis();
-        this->schedule_clean = false;
+        uint32_t const now = millis();
+        bool const quiet_enough = (now - this->last_update_time) >= this->full_refresh_min_idle_ms;
+        bool const refresh_overdue = (now - this->last_full_refresh_time) >= this->full_refresh_interval_ms;
+        if (quiet_enough && refresh_overdue)
+        {
+            // Display data is already transferred, the IT8951E must only refresh the EPD
+            IT8951E_LOGD(TAG, "Scheduled full refresh (idle %ums, interval %ums).",
+                         now - this->last_update_time, now - this->last_full_refresh_time);
+            this->update_area(0, 0, this->width, this->height, UpdateMode::GC16);
+            this->last_full_refresh_time = now;
+            this->schedule_clean = false;
+        }
     }
 }
 
@@ -864,6 +921,26 @@ void IT8951EDisplay::set_reversed(bool reversed)
 
 
 /**
+ * @brief Set the maximum interval between full GC16 refresh cycles.
+ * @param ms Interval in milliseconds.
+ */
+void IT8951EDisplay::set_full_refresh_interval(uint32_t ms)
+{
+    this->m->full_refresh_interval_ms = ms;
+}
+
+
+/**
+ * @brief Set the minimum idle time required before a full GC16 refresh is triggered.
+ * @param ms Idle period in milliseconds.
+ */
+void IT8951EDisplay::set_full_refresh_min_idle(uint32_t ms)
+{
+    this->m->full_refresh_min_idle_ms = ms;
+}
+
+
+/**
  * @brief Draw a pixel at the specified location
  * @param x X coordinate of the pixel
  * @param y Y coordinate of the pixel
@@ -887,5 +964,5 @@ void IT8951EDisplay::dump_config()
     ESP_LOGCONFIG(TAG, "  LUT version: '%s'", this->m->lut_version);
 }
 
-}  // namespace empty_spi_sensor
+}  // namespace it8951e
 }  // namespace esphome

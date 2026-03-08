@@ -101,6 +101,10 @@ display:
     reversed: false
     auto_clear_enabled: false
     update_interval: 100ms
+
+    full_refresh_interval: 5min
+    full_refresh_min_idle: 5s
+
     #show_test_card: true
     #lambda: |-
     #  it.line(0,0,50,50);
