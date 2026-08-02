@@ -1,7 +1,7 @@
 #include "bm8563.h"
 #include "esphome/components/i2c/i2c_bus.h"
 #include "esphome/core/log.h"
-#include <cerrno>
+#include <cinttypes>
 
 namespace esphome {
 namespace bm8563 {
@@ -44,9 +44,10 @@ void BM8563::update()
 void BM8563::dump_config()
 {
     ESP_LOGCONFIG(TAG, "BM8563:");
-    ESP_LOGCONFIG(TAG, "  Address: 0x%02X", this->address_);
-    ESP_LOGCONFIG(TAG, "  setupComplete: %s",
-                this->setupComplete ? "true" : "false");
+    LOG_I2C_DEVICE(this);
+    if (this->is_failed()) {
+      ESP_LOGE(TAG, ESP_LOG_MSG_COMM_FAIL);
+    }
 }
 
 void BM8563::write_time()
@@ -152,8 +153,7 @@ void BM8563::clear_alarm()
 
 void BM8563::set_fuzzy_alarm(uint32_t msec)
 {
-    ESP_LOGI(TAG, "Set alarm for: %u ms", msec);
-    // Frequencies: 4.096 Hz, 64Hz, 1Hzm 1/60 Hz
+    ESP_LOGI(TAG, "Set alarm for: %" PRIu32 " ms", msec);
     // Counter range: [0,255]
 
     // Maximum time achievable with each frequency (counter = 255)
@@ -183,7 +183,7 @@ void BM8563::set_fuzzy_alarm(uint32_t msec)
         counter_value = 255;
     }
 
-    ESP_LOGD(TAG, "Setting timer counter to %d and frequency %d", counter_value, timer_frequency);
+    ESP_LOGD(TAG, "Setting timer counter to %" PRId16 " and frequency %" PRIu8, counter_value, static_cast<uint8_t>(timer_frequency));
 
     // Enable timer interrupt and clear any timer flag. Alarm flag is not touched
     uint8_t control_reg2;

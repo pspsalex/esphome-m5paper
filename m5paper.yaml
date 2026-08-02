@@ -2,6 +2,11 @@ esphome:
   name: m5paper
   build_flags:
     - "-DLV_USE_ANIMATION=0"
+  on_boot:
+    - priority: 600
+      then:
+        - bm8563.clear_alarm
+        - bm8563.read_time
 
 external_components:
   - source: components
@@ -13,6 +18,7 @@ esp32:
     type: esp-idf
   flash_size: 16MB
   partitions: partitions_16mb.csv
+
 
 # Arduino:
 # esp32:
@@ -158,3 +164,8 @@ binary_sensor:
       inverted: true
     on_release:
       - component.update: m5paper_display
+
+time:
+  - platform: bm8563
+    id: rtc_time
+    update_interval: never
