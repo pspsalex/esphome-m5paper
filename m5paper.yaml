@@ -1,8 +1,7 @@
 esphome:
   name: m5paper
-  platformio_options:
-    build_flags:
-      - "-DLV_USE_ANIMATION=0"
+  build_flags:
+    - "-DLV_USE_ANIMATION=0"
 
 external_components:
   - source: components
@@ -41,7 +40,16 @@ esp32:
 # ota:
 #   - platform: esphome
 
+image:
+- byte_order: little_endian
+  file: assets/image.png
+  id: test_image
+  platform: file
+  transparency: alpha_channel
+  type: RGB565
+
 lvgl:
+  byte_order: little_endian
   draw_rounding: 4
   displays:
     - m5paper_display
@@ -55,6 +63,13 @@ lvgl:
             text: "Hello world!"
             text_font: montserrat_32
             text_color: black
+            x: 0
+            y: -50
+        - image:
+            src: test_image
+            x: 0
+            y: 50
+            align: CENTER
 
 # Enable logging
 logger:
@@ -117,7 +132,10 @@ touchscreen:
     mirror_y: false
   id: gt911_touchscreen
   display: m5paper_display
-  interrupt_pin: GPIO36
+  interrupt_pin:
+    number: GPIO36
+    mode:
+      input: true
 
   on_touch:
     - logger.log:

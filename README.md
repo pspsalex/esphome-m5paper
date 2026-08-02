@@ -46,7 +46,7 @@ EOL
 esphome compile m5paper.yaml
 ```
 
-When compilation is finished, a binary file will be available in `.esphome/build/m5paper/.pioenvs/m5paper/firmware.factory.bin`.
+When compilation is finished, a binary file will be available in `.esphome/build/m5paper/build/firmware.factory.bin`.
 
 Note: replace "m5paper" with the name of your project
 
@@ -54,7 +54,7 @@ Note: replace "m5paper" with the name of your project
 
 The simples way to get a 16MB image out of the compiled binary is to truncate the file to 16MB size:
 ```bash
-truncate -s 16777216 .esphome/build/m5paper/.pioenvs/m5paper/firmware.factory.bin
+truncate -s 16777216 .esphome/build/m5paper/build/firmware.factory.bin
 ```
 
 ### Configure the network
@@ -85,7 +85,7 @@ Only add the "`-nic tap,model...`" argument if you need networking.
 
 ```bash
 qemu-system-xtensa -m 4M -machine m5paper,gt911_address=0x5d \
-    -drive file=.esphome/build/m5paper/.pioenvs/m5paper/firmware.factory.bin,if=mtd,format=raw \
+    -drive file=.esphome/build/m5paper/build/firmware.factory.bin,if=mtd,format=raw \
     -global driver=timer.esp32.timg,property=wdt_disable,value=true \
     -serial mon:stdio \
     -drive id=efuse,if=none,format=raw,file=esp32-efuse.bin \

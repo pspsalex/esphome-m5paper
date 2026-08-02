@@ -18,7 +18,10 @@ class IT8951EDisplay: public display::DisplayBuffer,
   public:
     IT8951EDisplay();
 
+#ifdef USE_LOOP_PRIORITY
     float get_loop_priority() const override;
+#endif
+
     float get_setup_priority() const override;
 
     void set_reset_pin(GPIOPin *pin);

@@ -55,6 +55,7 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(): cv.use_id(IT8951EDisplay),
         }
     ),
+    synchronous=True
 )
 async def bm8563_read_time_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)

@@ -8,6 +8,7 @@
 
 #include <vector>
 #include <memory>
+#include <inttypes.h>
 
 
 namespace esphome {
@@ -234,7 +235,7 @@ void IT8951EDisplay::Impl::send_command(Command const command) const
     IT8951E_LOGD(TAG, "Write command 0x%02x", command);
     if (!this->wait_comms_ready())
     {
-        ESP_LOGE(TAG, "Display busy trying to write preamble for command 0x%04x", command);
+        ESP_LOGE(TAG, "Display busy trying to write preamble for command 0x%04" PRIx32, static_cast<uint32_t>(command));
 
         return;
     }
@@ -245,7 +246,7 @@ void IT8951EDisplay::Impl::send_command(Command const command) const
 
     if (!this->wait_comms_ready())
     {
-        ESP_LOGE(TAG, "Display busy trying to write command 0x%04x", command);
+        ESP_LOGE(TAG, "Display busy trying to write command 0x%04" PRIx32, static_cast<uint32_t>(command));
         return;
     }
 
@@ -628,21 +629,29 @@ void HOT IT8951EDisplay::Impl::put_pixel(int_fast16_t const x, int_fast16_t cons
         internal_color = (~internal_color) & 0xFu;
     }
 
+    uint8_t const old_byte = this->buffer[index];
+    uint8_t new_byte;
+
     if (x & 0x1)
     {
-        this->buffer[index] &= 0xF0;
-        this->buffer[index] |= internal_color;
+        new_byte = (old_byte & 0xF0) | internal_color;
     }
     else
     {
-        this->buffer[index] &= 0x0F;
-        this->buffer[index] |= internal_color << 4;
+        new_byte = (old_byte & 0x0F) | (internal_color << 4);
     }
 
-    if (x < this->dirty_rect.x1) this->dirty_rect.x1 = x;
-    if (y < this->dirty_rect.y1) this->dirty_rect.y1 = y;
-    if (x > this->dirty_rect.x2) this->dirty_rect.x2 = x;
-    if (y > this->dirty_rect.y2) this->dirty_rect.y2 = y;
+    if (new_byte == old_byte)
+    {
+        return;
+    }
+
+    this->buffer[index] = new_byte;
+
+    if (x < this->dirty_rect.x1) { this->dirty_rect.x1 = x; }
+    if (y < this->dirty_rect.y1) { this->dirty_rect.y1 = y; }
+    if (x > this->dirty_rect.x2) { this->dirty_rect.x2 = x; }
+    if (y > this->dirty_rect.y2) { this->dirty_rect.y2 = y; }
 }
 
 
@@ -748,6 +757,7 @@ IT8951EDisplay::IT8951EDisplay() :
 }
 
 
+#ifdef USE_LOOP_PRIORITY
 /**
  * @brief Get the loop priority. Defines when during the main loop() the display update is checked
  * @return 0.0f, the loop priority
@@ -756,7 +766,7 @@ float IT8951EDisplay::get_loop_priority() const
 {
     return 0.0f;
 }
-
+#endif
 
 /**
  * @brief Get the setup priority. Should initialize the display before other components like lvgl
@@ -907,8 +917,6 @@ void IT8951EDisplay::draw_pixels_at(int x_start, int y_start, int w, int h, cons
     }
 
     Display::draw_pixels_at(x_start, y_start, w, h, ptr, order, bitness, big_endian, x_offset, y_offset, x_pad);
-
-    this->m->notify_update(x_start, y_start, w, h);
 }
 
 
